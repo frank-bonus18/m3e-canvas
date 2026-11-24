@@ -21,10 +21,16 @@ export const PROVIDERS: { key: Provider; label: string; baseUrl: string; model: 
   { key: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-luna", keysUrl: "https://platform.openai.com/api-keys" },
   { key: "claude", label: "Claude", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5", keysUrl: "https://console.anthropic.com/settings/keys" },
   { key: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", keysUrl: "https://aistudio.google.com/apikey" },
-  { key: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", keysUrl: "https://platform.deepseek.com/api_keys" },
+  { key: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash", keysUrl: "https://platform.deepseek.com/api_keys" },
 ];
 
 export const providerSpec = (k: Provider) => PROVIDERS.find((p) => p.key === k) ?? PROVIDERS[0];
+
+/* 推理模型（DeepSeek 的 deepseek-flash / deepseek-v4-pro）把思考过程也算进
+   max_tokens：思考写完了正文就没了，接口回 finish_reason=length、content 为空。
+   旧上限 8192 在几屏的设计上会稳定踩到，所以放到 32768。这只是上限，
+   不会因为调高而多花钱，但足够装下思考 + 正文。 */
+const MAX_OUT = 32768;
 
 export const DEFAULT_AI: AiSettings = { provider: PROVIDERS[0].key, baseUrl: PROVIDERS[0].baseUrl, model: PROVIDERS[0].model, key: "" };
 
@@ -42,7 +48,45 @@ export function loadAiSettings(): AiSettings {
       if (typeof v.key === "string") s.key = v.key;
     }
   } catch {}
+  /* 旧版本存下来的模型名可能属于另一家服务：切了 provider 却留下上一家的 model，
+     对方会以 400（不支持的模型）拒掉，界面只显示「AI 请求失败」。按已知前缀纠正一次。 */
+  s.model = normaliseModel(s.provider, s.baseUrl, s.model);
   return s;
+}
+
+/** 这家服务官方接口的域名。只有指到官方接口时才敢纠正模型名 —— */
+const OFFICIAL_HOST: Record<Provider, string> = {
+  openai: "api.openai.com",
+  claude: "api.anthropic.com",
+  gemini: "generativelanguage.googleapis.com",
+  deepseek: "api.deepseek.com",
+};
+
+/** 模型名各家的前缀：用来认出「这个模型属于别家」。 */
+const MODEL_OWNER: [Provider, RegExp][] = [
+  ["openai", /^(gpt-|o\d|chatgpt-|text-|davinci)/i],
+  ["claude", /^claude/i],
+  ["gemini", /^(gemini|models\/gemini)/i],
+  ["deepseek", /^deepseek/i],
+];
+
+/** 清掉「这家 provider + 别家模型名」的组合。
+
+ *  只有 baseUrl 指向该 provider 的官方接口时才纠正；填了自建网关的一律原样返回，
+ *  因为网关上叫什么名字都是合理的。空模型名回落到这家服务的默认值。 */
+export function normaliseModel(provider: Provider, baseUrl: string, model: string): string {
+  const m = (model ?? "").trim();
+  if (!m) return providerSpec(provider).model;
+  let host = "";
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return m;
+  }
+  if (host !== OFFICIAL_HOST[provider]) return m;
+  const owner = MODEL_OWNER.find(([, re]) => re.test(m))?.[0];
+  if (!owner || owner === provider) return m;
+  return providerSpec(provider).model;
 }
 
 /** Settings live in this browser only, like the document itself. */
@@ -91,7 +135,7 @@ export async function complete(s: AiSettings, system: string, user: string, sign
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
       },
-      body: JSON.stringify({ model, max_tokens: Math.min(maxTokens, 8192), system, messages: [{ role: "user", content: user }] }),
+      body: JSON.stringify({ model, max_tokens: Math.min(maxTokens, MAX_OUT), system, messages: [{ role: "user", content: user }] }),
     });
     if (!res.ok) throw new Error(await readError(res));
     const j = await res.json();
@@ -112,7 +156,7 @@ export async function complete(s: AiSettings, system: string, user: string, sign
       model,
       /* OpenAI's newer models refuse `max_tokens` and default generously, so they get no budget;
          the other compatible endpoints cap around 8k */
-      ...(s.provider === "openai" ? {} : { max_tokens: Math.min(maxTokens, 8192) }),
+      ...(s.provider === "openai" ? {} : { max_tokens: Math.min(maxTokens, MAX_OUT) }),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -121,10 +165,16 @@ export async function complete(s: AiSettings, system: string, user: string, sign
   });
   if (!res.ok) throw new Error(await readError(res));
   const j = await res.json();
-  if (j.choices?.[0]?.finish_reason === "length") throw new Error("long");
-  const c = j.choices?.[0]?.message?.content;
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) return c.map((x: { text?: string }) => x.text ?? "").join("");
+  const choice = j.choices?.[0];
+  if (choice?.finish_reason === "length") throw new Error("long");
+  const c = choice?.message?.content;
+  if (typeof c === "string" && c.trim()) return c;
+  if (Array.isArray(c)) {
+    const text = c.map((x: { text?: string }) => x.text ?? "").join("");
+    if (text.trim()) return text;
+  }
+  /* 正文空但思考有内容：预算被思考吃光。报「太长」比报「读不懂」更接近真相。 */
+  if (typeof choice?.message?.reasoning_content === "string" && choice.message.reasoning_content) throw new Error("long");
   throw new Error("empty");
 }
 

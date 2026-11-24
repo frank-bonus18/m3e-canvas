@@ -1,6 +1,9 @@
-# M3E Canvas: sketches from an AI agent
+# M3E 画布（假期未知工作室版）：由 AI 代理绘制的界面草图
 
-M3E Canvas (https://lnkiai.github.io/m3e-canvas/) is a browser editor for Material 3 Expressive screens. A design is one JSON document. You, the agent, write that document and hand it back; the person opens it on their canvas, refines it, and turns it into a prompt for a coding tool.
+> 这是 [lnkiai/m3e-canvas](https://github.com/lnkiai/m3e-canvas)（MIT）的衍生版本，由**假期未知工作室**维护与部署。
+> 本文档是给 AI 代理读的机器说明书：你写下 JSON 设计文档，交回来，人在画布里打开它。
+
+M3E Canvas (https://frank-bonus18.github.io/m3e-canvas/) is a browser editor for Material 3 Expressive screens. A design is one JSON document. You, the agent, write that document and hand it back; the person opens it on their canvas, refines it, and turns it into a prompt for a coding tool.
 
 Fields may be added to this format; existing ones keep their meaning.
 
@@ -18,7 +21,7 @@ To make the link:
 import { readFileSync } from "node:fs";
 import { deflateRawSync } from "node:zlib";
 const json = readFileSync(process.argv[2], "utf8");
-console.log("https://lnkiai.github.io/m3e-canvas/#docz=" + deflateRawSync(json).toString("base64url"));
+console.log("https://frank-bonus18.github.io/m3e-canvas/#docz=" + deflateRawSync(json).toString("base64url"));
 ```
 
 ```python
@@ -27,10 +30,10 @@ import sys, zlib, base64
 data = open(sys.argv[1], "rb").read()
 c = zlib.compressobj(9, zlib.DEFLATED, -15)          # raw deflate, no header
 raw = c.compress(data) + c.flush()
-print("https://lnkiai.github.io/m3e-canvas/#docz=" + base64.urlsafe_b64encode(raw).decode().rstrip("="))
+print("https://frank-bonus18.github.io/m3e-canvas/#docz=" + base64.urlsafe_b64encode(raw).decode().rstrip("="))
 ```
 
-The link is long (a few thousand characters for a few screens). That is expected; it carries the whole design and nothing is stored anywhere. If you fetched this guide from a different address than `https://lnkiai.github.io/m3e-canvas/agent.md`, build the link on that address instead (the app lives next to its guide).
+The link is long (a few thousand characters for a few screens). That is expected; it carries the whole design and nothing is stored anywhere. If you fetched this guide from a different address than `https://frank-bonus18.github.io/m3e-canvas/agent.md`, build the link on that address instead (the app lives next to its guide).
 
 Keep the document under about 100 KB. An `image` part may carry `"src": "https://…"` pointing at a picture on the web; do not embed image data.
 

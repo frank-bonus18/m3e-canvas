@@ -1,3 +1,8 @@
+/* 字体自托管：不依赖 fonts.googleapis.com。
+   Material Symbols Rounded 与 Roboto 由 layout.tsx 注入 @font-face，
+   因为静态导出的 basePath 只能在构建期确定，CSS 里写不死绝对路径。
+   字体文件在 public/fonts/。 */
+
 @import "tailwindcss";
 
 html,
